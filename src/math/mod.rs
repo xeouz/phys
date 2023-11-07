@@ -89,13 +89,13 @@ pub fn vec3_to_vector(a: &Vec3) -> PhysVector2 {
 pub fn simple_point_in_body(point: &PhysVector2, body: &RigidBody) -> bool {
     match &body.body_type {
         &RigidBodyType::Circle { radius } => {
-            vector_distance(&body.data.position, point) <= radius
+            vector_distance(&body.position, point) <= radius
         },
         &RigidBodyType::Rect { width, height, data: _ } => {
             let (half_w, half_h) = (width/2.0, height/2.0);
-            (point.x <= body.data.position.x + half_w && body.data.position.x - half_w <= point.x)
+            (point.x <= body.position.x + half_w && body.position.x - half_w <= point.x)
             &&
-            (point.y >= body.data.position.y - half_h && body.data.position.y + half_h >= point.y)
+            (point.y >= body.position.y - half_h && body.position.y + half_h >= point.y)
         },
     }
 }
@@ -428,7 +428,7 @@ pub fn find_contact_points(body_a: &mut RigidBody, body_b: &mut RigidBody) -> (P
         
         else if body_a.get_body_index() == RigidBodyType::CIRCLE_INDEX { // CIRCLE TO CIRCLE
             let radius = match body_a.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
-            contact_one = find_contact_point_circle(&body_a.data.position, radius, &body_b.data.position);
+            contact_one = find_contact_point_circle(&body_a.position, radius, &body_b.position);
             contact_count = 1;
         }
     }
@@ -436,14 +436,14 @@ pub fn find_contact_points(body_a: &mut RigidBody, body_b: &mut RigidBody) -> (P
         if body_a.get_body_index() == RigidBodyType::RECT_INDEX
         && body_b.get_body_index() == RigidBodyType::CIRCLE_INDEX { // RECT TO CIRCLE
             let radius = match body_b.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
-            contact_one = find_contact_point_circle_polygon(&body_b.data.position, radius, body_a.get_transformed_vertices().unwrap());
+            contact_one = find_contact_point_circle_polygon(&body_b.position, radius, body_a.get_transformed_vertices().unwrap());
             contact_count = 1;
         }
         
         else if body_a.get_body_index() == RigidBodyType::CIRCLE_INDEX
         && body_b.get_body_index() == RigidBodyType::RECT_INDEX { // CIRCLE TO RECT
             let radius = match body_a.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
-            contact_one = find_contact_point_circle_polygon(&body_a.data.position, radius, body_b.get_transformed_vertices().unwrap());
+            contact_one = find_contact_point_circle_polygon(&body_a.position, radius, body_b.get_transformed_vertices().unwrap());
             contact_count = 1;
         }
     }

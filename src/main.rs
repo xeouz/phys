@@ -172,13 +172,13 @@ fn handle_mouse(
                     };
 
                     let (final_x, final_y) = (point.x + padding_x, point.y + padding_y);
-                    let original_position = phys_body.body.data.position;
+                    let original_position = phys_body.body.position;
                     let final_position = PhysVector2 { x: final_x, y: final_y };
                     phys_body.move_to_body(&final_position).unwrap();
                     
                     let diff = PhysVector2 { x: final_position.x - original_position.x, y: final_position.y - original_position.y };
                     let force = vector_floor(&diff).mul(5.0);
-                    phys_body.body.data.linear_velocity = force;
+                    phys_body.body.linear_velocity = force;
                 }
             }
         }

@@ -89,7 +89,7 @@ impl PhysManager {
         for (spawn_args, body) in bodies {
             let args = if let Some(a) = spawn_args { a } else {
                 let mut s = SpawnArgs::default();
-                if body.data.is_static {
+                if body.is_static {
                     s.stroke_color = Color::rgb_u8(0, 0, 0);
                     s.stroke_width = 4.0;
                 }
@@ -104,10 +104,10 @@ impl PhysManager {
     pub fn add_body(&mut self, commands: &mut Commands, body: RigidBody, spawn_args: SpawnArgs) -> Result<(), SpawnError>  {
         let (entity, n_render) = match &body.body_type {
             RigidBodyType::Rect { width, height, data: _ } => {
-                (spawn_rect(commands, &body.data.position, *height, *width, spawn_args)?, 2)
+                (spawn_rect(commands, &body.position, *height, *width, spawn_args)?, 2)
             },
             RigidBodyType::Circle { radius } => {
-                (spawn_circle(commands, &body.data.position, *radius, spawn_args)?, 1)
+                (spawn_circle(commands, &body.position, *radius, spawn_args)?, 1)
             }
         };
 
@@ -164,7 +164,7 @@ impl PhysManager {
         for i in 0..length-1 {
             for j in i+1..length {
                 let ((_, first_body), (_, second_body)) = self.get_two_body_mut(i, j).unwrap();
-                if first_body.body.data.is_static && second_body.body.data.is_static {
+                if first_body.body.is_static && second_body.body.is_static {
                     continue;
                 }
 
@@ -183,9 +183,9 @@ impl PhysManager {
                     let radius_a = match first_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
                     let radius_b = match second_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
                     (success, normal, depth) = intersect_circle(
-                        &first_body.body.data.position, 
+                        &first_body.body.position, 
                         radius_a,
-                        &second_body.body.data.position,
+                        &second_body.body.position,
                         radius_b);
                 }
                 
@@ -195,8 +195,8 @@ impl PhysManager {
                     // let (width_a, height_a, data_a) = match &first_body.body.body_type { RigidBodyType::Rect { width, height, data } => { Some((width,height,data)) }, _ => None }.unwrap();
                     // let (width_b, height_b, data_b) = match &second_body.body.body_type { RigidBodyType::Rect { width, height, data } => { Some((width,height,data)) }, _ => None }.unwrap();
                     
-                    let pa = first_body.body.data.position;
-                    let pb = second_body.body.data.position;
+                    let pa = first_body.body.position;
+                    let pb = second_body.body.position;
                     let va= first_body.body.get_transformed_vertices().unwrap();
                     let vb = second_body.body.get_transformed_vertices().unwrap();
                     (success, normal, depth) = intersect_polygons_centered(va, vb, pa, pb);
@@ -205,8 +205,8 @@ impl PhysManager {
                 // RECT AND CIRCLE
                 else if first_body.get_body_index() == RigidBodyType::RECT_INDEX && second_body.get_body_index() == RigidBodyType::CIRCLE_INDEX {
                     let radius = match second_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
-                    let center = &second_body.body.data.position;
-                    let polygon_center = first_body.body.data.position;
+                    let center = &second_body.body.position;
+                    let polygon_center = first_body.body.position;
                     let vertices = first_body.body.get_transformed_vertices().unwrap();
     
                     (success, normal, depth) = intersect_circle_polygon_centered(center, radius, vertices, polygon_center);
@@ -216,8 +216,8 @@ impl PhysManager {
                 // CIRCLE AND RECT
                 else if first_body.get_body_index() == RigidBodyType::CIRCLE_INDEX && second_body.get_body_index() == RigidBodyType::RECT_INDEX {
                     let radius = match first_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
-                    let center = &first_body.body.data.position;
-                    let polygon_center = second_body.body.data.position;
+                    let center = &first_body.body.position;
+                    let polygon_center = second_body.body.position;
                     let vertices = second_body.body.get_transformed_vertices().unwrap();
     
                     (success, normal, depth) = intersect_circle_polygon_centered(center, radius, vertices, polygon_center);
@@ -229,10 +229,10 @@ impl PhysManager {
                 }
     
                 if success {
-                    if first_body.body.data.is_static {
+                    if first_body.body.is_static {
                         second_body.move_body(&normal.mul(depth))?;
                     }
-                    else if second_body.body.data.is_static {
+                    else if second_body.body.is_static {
                         first_body.move_body(&normal.neg().mul(depth))?;
                     }
                     else {
@@ -256,21 +256,21 @@ impl PhysManager {
     pub fn resolve_collision(&mut self, contact: &PhysManifold) {
         let ((_, a), (_, b)) = self.get_two_body_mut(contact.a_index, contact.b_index).unwrap();
         
-        let relative_velocity = b.body.data.linear_velocity.sub(&a.body.data.linear_velocity);
+        let relative_velocity = b.body.linear_velocity.sub(&a.body.linear_velocity);
 
         if vector_dot(&relative_velocity, &contact.normal) > 0.0 { // Moving apart
             return;
         }
 
-        let e = f32::min(a.body.data.restitution, b.body.data.restitution);
+        let e = f32::min(a.body.restitution, b.body.restitution);
 
         let numerator = -(1.0 + e) * vector_dot(&relative_velocity, &contact.normal);
-        let denominator = a.body.data.inverse_mass + b.body.data.inverse_mass;
+        let denominator = a.body.inverse_mass + b.body.inverse_mass;
         let j = numerator / denominator;
 
         let impulse = contact.normal.mul(j);
-        a.body.data.linear_velocity = a.body.data.linear_velocity.sub(&impulse.mul(a.body.data.inverse_mass));
-        b.body.data.linear_velocity = b.body.data.linear_velocity.add(&impulse.mul(b.body.data.inverse_mass));
+        a.body.linear_velocity = a.body.linear_velocity.sub(&impulse.mul(a.body.inverse_mass));
+        b.body.linear_velocity = b.body.linear_velocity.add(&impulse.mul(b.body.inverse_mass));
     }
 
     pub fn step(&mut self, commands: &mut Commands, mut entity_q: Query<(&mut Transform, &mut Visibility, &mut SpawnMetadata)>, time: f32, iterations: usize) {
@@ -340,9 +340,9 @@ impl PhysManager {
             for (entity, body) in self.bodies.iter_mut() {
                 let result = entity_q.get_mut(*entity);
                 if let Ok((mut transform, _, _metadata)) = result {
-                    transform.translation.x = body.body.data.position.x;
-                    transform.translation.y = body.body.data.position.y;
-                    transform.rotation = Quat::from_rotation_z(body.body.data.rotation);
+                    transform.translation.x = body.body.position.x;
+                    transform.translation.y = body.body.position.y;
+                    transform.rotation = Quat::from_rotation_z(body.body.rotation);
                 }
             }
             //--- UPDATING POSITIONS ---//
