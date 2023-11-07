@@ -55,7 +55,13 @@ fn setup(
     
     let bodies = vec![
         (Some(SpawnArgs { z_value: 1.0, fill_color: Color::GRAY, stroke_color: Color::DARK_GRAY, stroke_width: 3.0, is_visible: true }),
-         create_rect_body(PhysVector2 { x: 0.0, y: -70.0 }, 2.0, 0.5, 70.0, 700.0, true)),
+        create_rect_body(PhysVector2 { x: 0.0, y: -70.0 }, 2.0, 0.5, 70.0, 700.0, 0.0, true)),
+         
+        //(Some(SpawnArgs { z_value: 1.0, fill_color: Color::GRAY, stroke_color: Color::DARK_GRAY, stroke_width: 3.0, is_visible: true }),
+        //create_rect_body(PhysVector2 { x: -150.0, y: 100.0 }, 2.0, 0.5, 40.0, 400.0, (PI/-20.0), true)),
+
+        //(Some(SpawnArgs { z_value: 1.0, fill_color: Color::GRAY, stroke_color: Color::DARK_GRAY, stroke_width: 3.0, is_visible: true }),
+        //create_rect_body(PhysVector2 { x: 150.0, y: 230.0 }, 2.0, 0.5, 40.0, 400.0, (PI/20.0), true)),
     ];
     manager.add_bodies(&mut commands, bodies).unwrap();
 }
@@ -96,7 +102,7 @@ fn handle_keyboard(
     else if input.just_pressed(KeyCode::E) {
         let (h,w) = (rand::thread_rng().gen_range(30..60) as f32, rand::thread_rng().gen_range(30..60) as f32);
         let (r,g, b) = (rand::thread_rng().gen_range(30..230), rand::thread_rng().gen_range(30..230), rand::thread_rng().gen_range(30..230));
-        let body = create_rect_body(point, 2.0, 0.6, h, w, false);
+        let body = create_rect_body(point, 2.0, 0.6, h, w, 0.0, false);
         let color = Color::rgb_u8(r, g, b);
         let spawn_args = SpawnArgs { z_value: 1.0, fill_color: color, stroke_color: *DEFAULT_STROKE_COLOR, stroke_width: DEFAULT_STROKE_WIDTH, is_visible: true };
         manager.add_body(&mut commands, body, spawn_args).unwrap();
@@ -104,7 +110,7 @@ fn handle_keyboard(
     else if input.just_pressed(KeyCode::T) {
         let radius = rand::thread_rng().gen_range(15..30) as f32;
         let (r,g, b) = (rand::thread_rng().gen_range(30..230), rand::thread_rng().gen_range(30..230), rand::thread_rng().gen_range(30..230));
-        let body = create_circle_body(point, 2.0, 0.6, radius, false);
+        let body = create_circle_body(point, 2.0, 0.6, radius, 0.0, false);
         let color = Color::rgb_u8(r, g, b);
         let spawn_args = SpawnArgs { z_value: 1.0, fill_color: color, stroke_color: *DEFAULT_STROKE_COLOR, stroke_width: DEFAULT_STROKE_WIDTH, is_visible: true };
         manager.add_body(&mut commands, body, spawn_args).unwrap();

@@ -36,6 +36,8 @@ pub struct RigidBody {
     pub restitution: f32,
     pub area: f32,
     pub inverse_mass: f32,
+    pub inertia: f32,
+    pub inverse_inertia: f32,
 
     pub is_static: bool,
 }
@@ -56,7 +58,7 @@ impl fmt::Display for RigidBodyType {
 }
 
 impl RigidBody {
-    pub fn new(body_type: RigidBodyType, aabb: PhysAABB, position: PhysVector2, density: f32, mass: f32, restitution: f32, area: f32, is_static: bool) -> Self {
+    pub fn new(body_type: RigidBodyType, aabb: PhysAABB, position: PhysVector2, density: f32, mass: f32, restitution: f32, area: f32, rotation: f32, is_static: bool) -> Self {
         if density > MAX_DENSITY {
             panic!("Cannot create rigid body of density={} greater than MAX_DENSITY={}!", density, MAX_DENSITY);
         }
@@ -72,7 +74,7 @@ impl RigidBody {
 
         let body_index = get_body_index(&body_type);
         
-        Self {
+        let mut r = Self {
             position: position,
             body_type: body_type,
             body_index: body_index,
@@ -81,15 +83,28 @@ impl RigidBody {
             aabb_update_required: true,
             force: ZERO_VECTOR2,
             linear_velocity: ZERO_VECTOR2,
-            rotation: 0.0,
+            rotation: rotation,
             rotational_velocity: 0.0,
             density: density,
             mass: mass,
             restitution: clamp(restitution, 0.0, 1.0),
             area: area,
             inverse_mass: inverse_mass,
-            is_static: is_static
-        }
+            is_static: is_static,
+            inertia: 0.0,
+            inverse_inertia: 0.0,
+        };
+
+        let inertia = r.calculate_rotational_inertia().unwrap();
+        let inverse_inertia = if !is_static {
+            1.0 / inertia
+        } else {
+            0.0
+        };
+
+        (r.inertia, r.inverse_inertia) = (inertia, inverse_inertia);
+
+        r
     }
     
     pub fn move_body(&mut self, amount: &PhysVector2) -> Result<(), RigidBodyMoveError> {
@@ -247,7 +262,7 @@ fn get_body_index(body_type: &RigidBodyType) -> u8 {
     }
 }
 
-pub fn create_circle_body(position: PhysVector2, density: f32, restitution: f32, radius: f32, is_static: bool) -> RigidBody {
+pub fn create_circle_body(position: PhysVector2, density: f32, restitution: f32, radius: f32, rotation: f32, is_static: bool) -> RigidBody {
     let area = radius*radius*PI;
 
     if area > MAX_BODY_SIZE {
@@ -261,10 +276,10 @@ pub fn create_circle_body(position: PhysVector2, density: f32, restitution: f32,
 
     let body_type = RigidBodyType::Circle { radius: radius };
     let aabb = PhysAABB::new(ZERO_VECTOR2, ZERO_VECTOR2);
-    RigidBody::new(body_type, aabb, position, density, mass, restitution, area, is_static)
+    RigidBody::new(body_type, aabb, position, density, mass, restitution, area, rotation, is_static)
 }
 
-pub fn create_rect_body(position: PhysVector2, density: f32, restitution: f32, height: f32, width: f32, is_static: bool) -> RigidBody {
+pub fn create_rect_body(position: PhysVector2, density: f32, restitution: f32, height: f32, width: f32, rotation: f32, is_static: bool) -> RigidBody {
     let area = width*height;
 
     if area > MAX_BODY_SIZE {
@@ -283,7 +298,7 @@ pub fn create_rect_body(position: PhysVector2, density: f32, restitution: f32, h
 
     let body_type = RigidBodyType::Rect { width: width, height: height, data: rect_data };
     let aabb = PhysAABB::new(ZERO_VECTOR2, ZERO_VECTOR2);
-    RigidBody::new(body_type, aabb, position, density, mass, restitution, area, is_static)
+    RigidBody::new(body_type, aabb, position, density, mass, restitution, area, rotation, is_static)
 }
 
 pub static ZERO_CIRCLE: RigidBodyType = RigidBodyType::Circle { radius: 0.0 };

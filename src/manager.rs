@@ -67,13 +67,12 @@ pub struct PhysManager {
     gravity: PhysVector2,
     pub world_extents: Extents, // LEFT RIGHT BOTTOM TOP
     pub bodies: Vec<(Entity, PhysBody)>,
-    pub contact_list: Option<Vec<PhysManifold>>,
     pub contact_list_render_pool: Vec<Entity>,
 }
 
 impl Default for PhysManager {
     fn default() -> Self {
-        Self::new(PhysVector2 { x: 0.0, y: -98.1*2.0 }, Extents { left: -600.0, right: 600.0, bottom: -350.0, top: 350.0 })
+        Self::new(PhysVector2 { x: 0.0, y: -98.1*5.0 }, Extents { left: -600.0, right: 600.0, bottom: -350.0, top: 350.0 })
     }
 }
 
@@ -82,7 +81,7 @@ impl PhysManager {
     pub const MAX_ITERATIONS: usize = 128;
     
     pub fn new(gravity: PhysVector2, world_extents: Extents) -> Self {
-        Self { gravity: gravity, world_extents: world_extents, bodies: vec![], contact_list_render_pool: vec![], contact_list: None }
+        Self { gravity: gravity, world_extents: world_extents, bodies: vec![], contact_list_render_pool: vec![] }
     }
     
     pub fn add_bodies(&mut self, commands: &mut Commands, bodies: Vec<(Option<SpawnArgs>, RigidBody)>) -> Result<(), SpawnError> {
@@ -158,9 +157,70 @@ impl PhysManager {
         }
     }
 
-    pub fn handle_collisions(&mut self) -> Result<Vec<PhysManifold>, RigidBodyMoveError> {
+    fn collide_bodies(&mut self, a_index: usize, b_index: usize) -> ((&mut PhysBody, &mut PhysBody), (bool, PhysVector2, f32)) {
+        let ((_, first_body), (_, second_body)) = self.get_two_body_mut(a_index, b_index).unwrap();
+        
+        let mut success: bool = false;
+        let mut normal: PhysVector2 = ZERO_VECTOR2;
+        let mut depth: f32 = 0.0;
+
+        // CIRCLE AND CIRCLE
+        if first_body.get_body_index() == second_body.get_body_index()
+        && first_body.get_body_index() == RigidBodyType::CIRCLE_INDEX {
+            let radius_a = match first_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
+            let radius_b = match second_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
+            (success, normal, depth) = intersect_circle(
+                &first_body.body.position, 
+                radius_a,
+                &second_body.body.position,
+                radius_b);
+        }
+        
+        // RECT AND RECT
+        else if first_body.get_body_index() == second_body.get_body_index()
+        && first_body.get_body_index() == RigidBodyType::RECT_INDEX {
+            // let (width_a, height_a, data_a) = match &first_body.body.body_type { RigidBodyType::Rect { width, height, data } => { Some((width,height,data)) }, _ => None }.unwrap();
+            // let (width_b, height_b, data_b) = match &second_body.body.body_type { RigidBodyType::Rect { width, height, data } => { Some((width,height,data)) }, _ => None }.unwrap();
+            
+            let pa = first_body.body.position;
+            let pb = second_body.body.position;
+            let va= first_body.body.get_transformed_vertices().unwrap();
+            let vb = second_body.body.get_transformed_vertices().unwrap();
+            (success, normal, depth) = intersect_polygons_centered(va, vb, pa, pb);
+        }
+        
+        // RECT AND CIRCLE
+        else if first_body.get_body_index() == RigidBodyType::RECT_INDEX && second_body.get_body_index() == RigidBodyType::CIRCLE_INDEX {
+            let radius = match second_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
+            let center = &second_body.body.position;
+            let polygon_center = first_body.body.position;
+            let vertices = first_body.body.get_transformed_vertices().unwrap();
+
+            (success, normal, depth) = intersect_circle_polygon_centered(center, radius, vertices, polygon_center);
+            normal = normal.neg();
+        }
+
+        // CIRCLE AND RECT
+        else if first_body.get_body_index() == RigidBodyType::CIRCLE_INDEX && second_body.get_body_index() == RigidBodyType::RECT_INDEX {
+            let radius = match first_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
+            let center = &first_body.body.position;
+            let polygon_center = second_body.body.position;
+            let vertices = second_body.body.get_transformed_vertices().unwrap();
+
+            (success, normal, depth) = intersect_circle_polygon_centered(center, radius, vertices, polygon_center);
+        }
+
+        // UNKNOWN           
+        else {
+            println!("Cannot compute collision between {} and {}", first_body.body.body_type, second_body.body.body_type);
+        }
+
+        ((first_body, second_body), (success, normal, depth))
+    }
+
+    fn broad_phase(&mut self) -> Result<Vec<(usize, usize)>, RigidBodyMoveError> {
         let length = self.bodies.len();
-        let mut contact_list: Vec<PhysManifold> = vec![];
+        let mut contact_pairs: Vec<(usize, usize)> = vec![];
         for i in 0..length-1 {
             for j in i+1..length {
                 let ((_, first_body), (_, second_body)) = self.get_two_body_mut(i, j).unwrap();
@@ -172,85 +232,74 @@ impl PhysManager {
                 if !intersect_aabb(&first_aabb, &second_aabb) {
                     continue;
                 }
-    
-                let mut success: bool = false;
-                let mut normal: PhysVector2 = ZERO_VECTOR2;
-                let mut depth: f32 = 0.0;
-    
-                // CIRCLE AND CIRCLE
-                if first_body.get_body_index() == second_body.get_body_index()
-                && first_body.get_body_index() == RigidBodyType::CIRCLE_INDEX {
-                    let radius_a = match first_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
-                    let radius_b = match second_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
-                    (success, normal, depth) = intersect_circle(
-                        &first_body.body.position, 
-                        radius_a,
-                        &second_body.body.position,
-                        radius_b);
-                }
-                
-                // RECT AND RECT
-                else if first_body.get_body_index() == second_body.get_body_index()
-                && first_body.get_body_index() == RigidBodyType::RECT_INDEX {
-                    // let (width_a, height_a, data_a) = match &first_body.body.body_type { RigidBodyType::Rect { width, height, data } => { Some((width,height,data)) }, _ => None }.unwrap();
-                    // let (width_b, height_b, data_b) = match &second_body.body.body_type { RigidBodyType::Rect { width, height, data } => { Some((width,height,data)) }, _ => None }.unwrap();
-                    
-                    let pa = first_body.body.position;
-                    let pb = second_body.body.position;
-                    let va= first_body.body.get_transformed_vertices().unwrap();
-                    let vb = second_body.body.get_transformed_vertices().unwrap();
-                    (success, normal, depth) = intersect_polygons_centered(va, vb, pa, pb);
-                }
-                
-                // RECT AND CIRCLE
-                else if first_body.get_body_index() == RigidBodyType::RECT_INDEX && second_body.get_body_index() == RigidBodyType::CIRCLE_INDEX {
-                    let radius = match second_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
-                    let center = &second_body.body.position;
-                    let polygon_center = first_body.body.position;
-                    let vertices = first_body.body.get_transformed_vertices().unwrap();
-    
-                    (success, normal, depth) = intersect_circle_polygon_centered(center, radius, vertices, polygon_center);
-                    normal = normal.neg();
-                }
-    
-                // CIRCLE AND RECT
-                else if first_body.get_body_index() == RigidBodyType::CIRCLE_INDEX && second_body.get_body_index() == RigidBodyType::RECT_INDEX {
-                    let radius = match first_body.body.body_type { RigidBodyType::Circle { radius } => radius, _ => 0.0 };
-                    let center = &first_body.body.position;
-                    let polygon_center = second_body.body.position;
-                    let vertices = second_body.body.get_transformed_vertices().unwrap();
-    
-                    (success, normal, depth) = intersect_circle_polygon_centered(center, radius, vertices, polygon_center);
-                }
-    
-                // UNKNOWN           
-                else {
-                    println!("Cannot compute collision between {} and {}", first_body.body.body_type, second_body.body.body_type);
-                }
-    
-                if success {
-                    if first_body.body.is_static {
-                        second_body.move_body(&normal.mul(depth))?;
-                    }
-                    else if second_body.body.is_static {
-                        first_body.move_body(&normal.neg().mul(depth))?;
-                    }
-                    else {
-                        first_body.move_body(&normal.neg().mul(depth / 2.0))?;
-                        second_body.move_body(&normal.mul(depth / 2.0))?;
-                    }
-                    
-                    let (contact_one, contact_two, contact_count) = find_contact_points(&mut first_body.body, &mut second_body.body);
-                    let contact = PhysManifold {
-                        a_index: i, b_index: j, normal: normal, depth: depth, contact_one: contact_one, contact_two: contact_two, contact_count: contact_count
-                    };
-                    contact_list.push(contact);
-                    // Self::resolve_collision(first_body, second_body, &normal, depth);
-                }
+
+                contact_pairs.push((i, j));
             }
         }
     
-        Ok(contact_list)
+        Ok(contact_pairs)
+    }
+
+    fn narrow_phase(&mut self, contact_pairs: Vec<(usize, usize)>, entity_q: &mut Query<(&mut Transform, &mut Visibility, &mut SpawnMetadata)>) -> Result<(), RigidBodyMoveError> {
+        let mut contact_points: Vec<PhysManifold> = vec![];
+        
+        for contact_pair in contact_pairs.iter() {
+            let ((first_body, second_body), (success, normal, depth)) = self.collide_bodies(contact_pair.0, contact_pair.1);
+                
+            if success {
+                if first_body.body.is_static {
+                    second_body.move_body(&normal.mul(depth))?;
+                }
+                else if second_body.body.is_static {
+                    first_body.move_body(&normal.neg().mul(depth))?;
+                }
+                else {
+                    first_body.move_body(&normal.neg().mul(depth / 2.0))?;
+                    second_body.move_body(&normal.mul(depth / 2.0))?;
+                }
+                
+                let (contact_one, contact_two, contact_count) = find_contact_points(&mut first_body.body, &mut second_body.body);
+                let contact = PhysManifold {
+                    a_index: contact_pair.0, b_index: contact_pair.1, normal: normal, depth: depth, contact_one: contact_one, contact_two: contact_two, contact_count: contact_count
+                };
+                self.resolve_collision(&contact);
+                contact_points.push(contact)
+            }
+
+        }
+
+        let mut next_contact: Option<PhysVector2> = None;
+        let mut indx = 0; // keep a manual index
+        for render_entity in self.contact_list_render_pool.iter() {
+            if next_contact.is_some() {
+                if let Ok((mut transform, mut render_vis, _)) = entity_q.get_mut(*render_entity) {
+                    let point = next_contact.unwrap();
+                    (transform.translation.x, transform.translation.y) = (point.x, point.y);
+                    *render_vis = Visibility::Visible;
+                }
+                next_contact = None;
+                continue;
+            }
+
+            if let Ok((mut transform, mut render_vis, _)) = entity_q.get_mut(*render_entity) {
+                *render_vis = Visibility::Hidden;
+                if let Some(contact) = contact_points.get(indx) {
+                    if contact.contact_count > 0 {
+                        let point = contact.contact_one;
+                        (transform.translation.x, transform.translation.y) = (point.x, point.y);
+                        *render_vis = Visibility::Visible;
+
+                        if contact.contact_count == 2 {
+                            next_contact = Some(contact.contact_two);
+                        }
+                    }
+                }
+            }
+
+            indx += 1;
+        }
+
+        Ok(())
     }
 
     pub fn resolve_collision(&mut self, contact: &PhysManifold) {
@@ -277,75 +326,39 @@ impl PhysManager {
         let num_iterations = clamp(iterations, Self::MIN_ITERATIONS, Self::MAX_ITERATIONS);
 
         for i in 0..num_iterations {
-            //--- LOOPING --//
-            let mut remove_indices: Vec<usize> = vec![];
-            for (index, (_, body)) in self.bodies.iter_mut().enumerate() {
-                body.step(time, iterations, &self.gravity);
-
-                let aabb = body.body.get_aabb().unwrap();
-                if aabb.max.y < self.world_extents.bottom {
-                    remove_indices.push(index)
-                }
-            }
-
-            let mut cnt = 0;
-            for index in remove_indices {
-                self.remove_body(commands, index-cnt);
-                cnt+=1;
-            }
-            //--- LOOPING --//
+            self.step_bodies(commands, &mut entity_q, time, iterations);
 
             //--- COLLISION DETECTION ---//
-            let contact_list = self.handle_collisions().unwrap();
-
-            let mut next_contact: Option<PhysVector2> = None;
-            let mut indx = 0; // keep a manual index
-            for render_entity in self.contact_list_render_pool.iter() {
-                if next_contact.is_some() {
-                    if let Ok((mut transform, mut render_vis, _)) = entity_q.get_mut(*render_entity) {
-                        let point = next_contact.unwrap();
-                        (transform.translation.x, transform.translation.y) = (point.x, point.y);
-                        *render_vis = Visibility::Visible;
-                    }
-                    next_contact = None;
-                    continue;
-                }
-
-                if let Ok((mut transform, mut render_vis, _)) = entity_q.get_mut(*render_entity) {
-                    *render_vis = Visibility::Hidden;
-                    if let Some(contact) = contact_list.get(indx) {
-                        if contact.contact_count > 0 {
-                            let point = contact.contact_one;
-                            (transform.translation.x, transform.translation.y) = (point.x, point.y);
-                            *render_vis = Visibility::Visible;
-
-                            if contact.contact_count == 2 {
-                                next_contact = Some(contact.contact_two);
-                            }
-                        }
-                    }
-                }
-
-                indx += 1;
-            }
-
-            for contact in contact_list.iter() {
-                self.resolve_collision(contact);
-            }
-
-            let _ = self.contact_list.insert(contact_list);
+            let res = self.broad_phase().unwrap();
+            self.narrow_phase(res, &mut entity_q);
             //--- COLLISION DETECTION ---//
+        }
+    }
 
-            //--- UPDATING POSITIONS ---//
-            for (entity, body) in self.bodies.iter_mut() {
-                let result = entity_q.get_mut(*entity);
-                if let Ok((mut transform, _, _metadata)) = result {
-                    transform.translation.x = body.body.position.x;
-                    transform.translation.y = body.body.position.y;
-                    transform.rotation = Quat::from_rotation_z(body.body.rotation);
-                }
+    fn step_bodies(&mut self, commands: &mut Commands, entity_q: &mut Query<(&mut Transform, &mut Visibility, &mut SpawnMetadata)>, time: f32, iterations: usize) {
+        let mut remove_indices: Vec<usize> = vec![];
+        for (index, (_, body)) in self.bodies.iter_mut().enumerate() {
+            body.step(time, iterations, &self.gravity);
+
+            let aabb = body.body.get_aabb().unwrap();
+            if aabb.max.y < self.world_extents.bottom {
+                remove_indices.push(index)
             }
-            //--- UPDATING POSITIONS ---//
+        }
+
+        let mut cnt = 0;
+        for index in remove_indices {
+            self.remove_body(commands, index-cnt);
+            cnt+=1;
+        }
+
+        for (entity, body) in self.bodies.iter_mut() {
+            let result = entity_q.get_mut(*entity);
+            if let Ok((mut transform, _, _metadata)) = result {
+                transform.translation.x = body.body.position.x;
+                transform.translation.y = body.body.position.y;
+                transform.rotation = Quat::from_rotation_z(body.body.rotation);
+            }
         }
     }
 }
