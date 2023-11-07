@@ -55,23 +55,6 @@ impl fmt::Display for RigidBodyType {
     }
 }
 
-#[derive(Default)]
-pub struct RigidBodyData {
-    force: PhysVector2,
-    pub linear_velocity: PhysVector2,
-    pub rotational_velocity: f32,
-    pub rotation: f32,
-
-    pub position: PhysVector2,
-    pub density: f32,
-    pub mass: f32,
-    pub restitution: f32,
-    pub area: f32,
-    pub inverse_mass: f32,
-
-    pub is_static: bool,
-}
-
 impl RigidBody {
     pub fn new(body_type: RigidBodyType, aabb: PhysAABB, position: PhysVector2, density: f32, mass: f32, restitution: f32, area: f32, is_static: bool) -> Self {
         if density > MAX_DENSITY {
@@ -232,79 +215,6 @@ impl RigidBody {
     }
 }
 
-impl RigidBodyData {
-    pub fn new(position: PhysVector2, density: f32, mass: f32, restitution: f32, area: f32, is_static: bool) -> Self {
-        if density > MAX_DENSITY {
-            panic!("Cannot create rigid body of density={} greater than MAX_DENSITY={}!", density, MAX_DENSITY);
-        }
-        else if density < MIN_DENSITY {
-            panic!("Cannot create rigid body of density={} lesser than MIN_DENSITY={}!", density, MIN_DENSITY);
-        }
-
-        let inverse_mass = if !is_static {
-            1.0 / mass
-        } else {
-            0.0
-        };
-
-        RigidBodyData {
-            force: ZERO_VECTOR2,
-            position: position, 
-            linear_velocity: ZERO_VECTOR2,
-            rotation: 0.0,
-            rotational_velocity: 0.0,
-            density: density,
-            mass: mass,
-            restitution: clamp(restitution, 0.0, 1.0),
-            area: area,
-            inverse_mass: inverse_mass,
-            is_static: is_static
-        }
-    }
-
-    pub fn move_body(&mut self, amount: &PhysVector2) -> Result<(), RigidBodyMoveError> {
-        self.position = self.position.add(amount);
-
-        Ok(())
-    }
-
-    pub fn move_to_body(&mut self, position: &PhysVector2) -> Result<(), RigidBodyMoveError> {
-        self.position = position.clone();
-
-        Ok(())
-    }
-
-    pub fn rotate(&mut self, amount: f32) -> Result<(), RigidBodyMoveError> {
-        self.rotation += amount;
-
-        Ok(())
-    }
-
-    pub fn step(&mut self, delta_time: f32, iterations: usize, gravity: &PhysVector2) {
-        if self.is_static {
-            return;
-        }
-
-        let time = delta_time / iterations as f32;
-
-        /*
-        let acceleration = self.force.div(self.mass);
-        self.linear_velocity = self.linear_velocity.add(&acceleration.mul(time));
-        */
-
-        self.linear_velocity = self.linear_velocity.add(&gravity.mul(time));
-        self.position = self.position.add(&self.linear_velocity.mul(time));
-
-        self.rotation = self.rotation.add(&self.rotational_velocity.mul(time));
-
-        self.force = ZERO_VECTOR2;
-    }
-
-    pub fn add_force(&mut self, force: PhysVector2) {
-        self.force = force;
-    }
-}
-
 impl RigidBodyType {
     pub const CIRCLE_INDEX: u8 = 0;
     pub const RECT_INDEX: u8 = 1;
@@ -349,7 +259,6 @@ pub fn create_circle_body(position: PhysVector2, density: f32, restitution: f32,
 
     let mass = area * density;
 
-    let data = RigidBodyData::new(position, density, mass, restitution, area, is_static);
     let body_type = RigidBodyType::Circle { radius: radius };
     let aabb = PhysAABB::new(ZERO_VECTOR2, ZERO_VECTOR2);
     RigidBody::new(body_type, aabb, position, density, mass, restitution, area, is_static)
@@ -372,7 +281,6 @@ pub fn create_rect_body(position: PhysVector2, density: f32, restitution: f32, h
     let transformed_vertices: [PhysVector2; 4] = Default::default();
     let rect_data = RectData { vertices: vertices.to_vec(), triangles: triangles.to_vec(), transformed_vertices: transformed_vertices.to_vec() };
 
-    let data = RigidBodyData::new(position, density, mass, restitution, area, is_static);
     let body_type = RigidBodyType::Rect { width: width, height: height, data: rect_data };
     let aabb = PhysAABB::new(ZERO_VECTOR2, ZERO_VECTOR2);
     RigidBody::new(body_type, aabb, position, density, mass, restitution, area, is_static)

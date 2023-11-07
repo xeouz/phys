@@ -7,7 +7,7 @@ pub mod manifold;
 use bevy::prelude::{Vec2, Vec3};
 use vector::PhysVector2;
 
-use self::{rigidbody::{RigidBodyData, RigidBody, RigidBodyType}, vector::ZERO_VECTOR2, transform::PhysTransform, aabb::PhysAABB};
+use self::{rigidbody::{RigidBody, RigidBodyType}, vector::ZERO_VECTOR2, transform::PhysTransform, aabb::PhysAABB};
 
 pub const SMALL_VAL: f32 = 0.0005;
 
