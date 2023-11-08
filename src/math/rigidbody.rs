@@ -38,6 +38,8 @@ pub struct RigidBody {
     pub inverse_mass: f32,
     pub inertia: f32,
     pub inverse_inertia: f32,
+    pub static_friction: f32,
+    pub dynamic_friction: f32,
 
     pub is_static: bool,
 }
@@ -93,6 +95,8 @@ impl RigidBody {
             is_static: is_static,
             inertia: 0.0,
             inverse_inertia: 0.0,
+            static_friction: 0.6,
+            dynamic_friction: 0.4,
         };
 
         let inertia = r.calculate_rotational_inertia().unwrap();
@@ -155,11 +159,9 @@ impl RigidBody {
 
         let time = delta_time / iterations as f32;
 
-        /*
         let acceleration = self.force.div(self.mass);
         self.linear_velocity = self.linear_velocity.add(&acceleration.mul(time));
-        */
-
+        
         self.linear_velocity = self.linear_velocity.add(&gravity.mul(time));
         self.position = self.position.add(&self.linear_velocity.mul(time));
 

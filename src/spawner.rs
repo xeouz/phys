@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 use crate::math::{vector::PhysVector2, vector_to_vec2, vector_distance};
 
 pub static DEFAULT_Z_VALUE: f32 = 1.0;
-pub static DEFAULT_STROKE_WIDTH: f32 = 2.5;
+pub static DEFAULT_STROKE_WIDTH: f32 = 0.25;
 pub static DEFAULT_FILL_COLOR: Lazy<Color> = Lazy::new(|| {
     Color::rgba_u8(224, 108, 117, 255)
 });

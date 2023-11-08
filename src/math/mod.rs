@@ -37,6 +37,10 @@ pub fn vector_nearly_equal(a: &PhysVector2, b: &PhysVector2) -> bool {
     nearly_equal(a.x, b.x) && nearly_equal(a.y, b.y)
 }
 
+pub fn vector_average(a: &PhysVector2, b: &PhysVector2) -> PhysVector2 {
+    a.add(b).div(2.0)
+}
+
 pub fn vector_length(a: &PhysVector2) -> f32 {
     f32::sqrt(a.x*a.x + a.y*a.y)
 }

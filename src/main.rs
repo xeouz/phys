@@ -9,7 +9,7 @@ mod spawner;
 mod math;
 mod manager;
 use manager::{PhysManager, WorldData, PhysBody};
-use math::{vector::{PhysVector2, ZERO_VECTOR2}, rigidbody::{create_circle_body, create_rect_body, RigidBodyType}, simple_point_in_body, vec2_to_vector, intersect_circle, vector_to_vec2, vec3_to_vector, vector_normalize, vector_distance};
+use math::{vector::{PhysVector2, ZERO_VECTOR2}, rigidbody::{create_circle_body, create_rect_body, RigidBodyType}, simple_point_in_body, vec2_to_vector, intersect_circle, vector_to_vec2, vec3_to_vector, vector_normalize, vector_distance, vector_distance_squared};
 use spawner::{SpawnMetadata, DEFAULT_STROKE_COLOR, SpawnArgs, DEFAULT_STROKE_WIDTH};
 
 use crate::{spawner::SpawnType, math::vector_floor};
@@ -42,26 +42,30 @@ fn setup(
         0: Vec2::ZERO,
         1: Vec2::ZERO
     };
-    commands.spawn(Camera2dBundle::default());
+
+    let mut camera = Camera2dBundle::default();
+    camera.projection.scale /= 20.0;
+
+    commands.spawn(camera);
     commands.spawn((ShapeBundle {
         path: GeometryBuilder::build_as(&shape),
         transform: Transform::from_xyz(0.0, 0.0, 0.0),
         ..default()
         },
         Fill::color(Color::CYAN),
-        Stroke::new(Color::GRAY, 3.0),
+        Stroke::new(Color::GRAY, 0.3),
         CursorImpulseShape
     ));
     
     let bodies = vec![
-        (Some(SpawnArgs { z_value: 1.0, fill_color: Color::GRAY, stroke_color: Color::DARK_GRAY, stroke_width: 3.0, is_visible: true }),
-        create_rect_body(PhysVector2 { x: 0.0, y: -70.0 }, 2.0, 0.5, 70.0, 700.0, 0.0, true)),
+        (Some(SpawnArgs { z_value: 1.0, fill_color: Color::GRAY, stroke_color: Color::DARK_GRAY, stroke_width: 0.3, is_visible: true }),
+        create_rect_body(PhysVector2 { x: 0.0, y: -3.5 }, 2.0, 1.0, 3.5, 35.0, 0.0, true)),
          
-        //(Some(SpawnArgs { z_value: 1.0, fill_color: Color::GRAY, stroke_color: Color::DARK_GRAY, stroke_width: 3.0, is_visible: true }),
-        //create_rect_body(PhysVector2 { x: -150.0, y: 100.0 }, 2.0, 0.5, 40.0, 400.0, (PI/-20.0), true)),
+        (Some(SpawnArgs { z_value: 1.0, fill_color: Color::GRAY, stroke_color: Color::DARK_GRAY, stroke_width: 0.3, is_visible: true }),
+        create_rect_body(PhysVector2 { x: -7.5, y: 6.0 }, 2.0, 1.0, 2.0, 20.0, (PI/-20.0), true)),
 
-        //(Some(SpawnArgs { z_value: 1.0, fill_color: Color::GRAY, stroke_color: Color::DARK_GRAY, stroke_width: 3.0, is_visible: true }),
-        //create_rect_body(PhysVector2 { x: 150.0, y: 230.0 }, 2.0, 0.5, 40.0, 400.0, (PI/20.0), true)),
+        (Some(SpawnArgs { z_value: 1.0, fill_color: Color::GRAY, stroke_color: Color::DARK_GRAY, stroke_width: 0.3, is_visible: true }),
+        create_rect_body(PhysVector2 { x: 7.5, y: 12.5 }, 2.0, 1.0, 2.0, 20.0, (PI/20.0), true)),
     ];
     manager.add_bodies(&mut commands, bodies).unwrap();
 }
@@ -95,22 +99,24 @@ fn handle_keyboard(
     let mut point = vec2_to_vector(&pos.unwrap());
     point.x -= window.width() / 2.0;
     point.y = (point.y - window.height() / 2.0) * -1.0;
+    point.x /= 20.0;
+    point.y /= 20.0;
 
     if input.pressed(KeyCode::Escape) {
         app_exit_events.send(AppExit)
     }
     else if input.just_pressed(KeyCode::E) {
-        let (h,w) = (rand::thread_rng().gen_range(30..60) as f32, rand::thread_rng().gen_range(30..60) as f32);
+        let (h,w) = (rand::thread_rng().gen_range(1.5..3.0) as f32, rand::thread_rng().gen_range(1.5..3.0) as f32);
         let (r,g, b) = (rand::thread_rng().gen_range(30..230), rand::thread_rng().gen_range(30..230), rand::thread_rng().gen_range(30..230));
-        let body = create_rect_body(point, 2.0, 0.6, h, w, 0.0, false);
+        let body = create_rect_body(point, 2.0, 1.0, h, w, 0.0, false);
         let color = Color::rgb_u8(r, g, b);
         let spawn_args = SpawnArgs { z_value: 1.0, fill_color: color, stroke_color: *DEFAULT_STROKE_COLOR, stroke_width: DEFAULT_STROKE_WIDTH, is_visible: true };
         manager.add_body(&mut commands, body, spawn_args).unwrap();
     }
     else if input.just_pressed(KeyCode::T) {
-        let radius = rand::thread_rng().gen_range(15..30) as f32;
+        let radius = rand::thread_rng().gen_range(0.75..1.5) as f32;
         let (r,g, b) = (rand::thread_rng().gen_range(30..230), rand::thread_rng().gen_range(30..230), rand::thread_rng().gen_range(30..230));
-        let body = create_circle_body(point, 2.0, 0.6, radius, 0.0, false);
+        let body = create_circle_body(point, 2.0, 1.0, radius, 0.0, false);
         let color = Color::rgb_u8(r, g, b);
         let spawn_args = SpawnArgs { z_value: 1.0, fill_color: color, stroke_color: *DEFAULT_STROKE_COLOR, stroke_width: DEFAULT_STROKE_WIDTH, is_visible: true };
         manager.add_body(&mut commands, body, spawn_args).unwrap();
@@ -136,6 +142,8 @@ fn handle_mouse(
     let mut point = vec2_to_vector(&pos.unwrap());
     point.x -= window.width() / 2.0;
     point.y = (point.y - window.height() / 2.0) * -1.0;
+    point.x /= 20.0;
+    point.y /= 20.0;
 
     if input.just_pressed(MouseButton::Left) || input.just_pressed(MouseButton::Right) {
         for (index, (_entity, body)) in manager.bodies.iter().enumerate() {
@@ -216,17 +224,20 @@ fn handle_mouse(
         if let Ok((transform, _, mut stroke)) = entity_result {
             stroke.color = *DEFAULT_STROKE_COLOR;
 
-            let impulse = point.sub(&vec3_to_vector(&transform.translation)).neg();
-            let (_, body) = manager.get_body_mut(index).unwrap();
-            body.add_force(impulse);
+            let target = &vec3_to_vector(&transform.translation);
+            let dist = vector_distance_squared(&point, target);
+            let impulse = point.sub(target).neg().mul(dist*100.0);
+            if let Some((_, body)) = manager.get_body_mut(index) {
+                body.add_force(impulse);
 
-            let result = impulse_q.get_single_mut();
-            if let Ok((mut path, _)) = result {
-                let shape = shapes::Line {
-                    0: Vec2::ZERO,
-                    1: Vec2::ZERO
-                };
-                *path = ShapePath::build_as(&shape);
+                let result = impulse_q.get_single_mut();
+                if let Ok((mut path, _)) = result {
+                    let shape = shapes::Line {
+                        0: Vec2::ZERO,
+                        1: Vec2::ZERO
+                    };
+                    *path = ShapePath::build_as(&shape);
+                }
             }
         }
     }

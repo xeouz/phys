@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Add};
 
 use bevy::prelude::*;
 
-use crate::{math::{rigidbody::{RigidBody, RigidBodyType, RigidBodyMoveError, RigidBodyAABBError}, vector::{PhysVector2, ZERO_VECTOR2}, intersect_circle, intersect_polygons, intersect_circle_polygon, vector_dot, intersect_polygons_centered, intersect_circle_polygon_centered, clamp, manifold::PhysManifold, find_contact_points, aabb::PhysAABB, intersect_aabb}, spawner::{spawn_rect, spawn_rect_default, SpawnError, spawn_circle_default, SpawnMetadata, SpawnArgs, spawn_circle, DEFAULT_STROKE_COLOR, DEFAULT_FILL_COLOR, DEFAULT_STROKE_WIDTH}};
+use crate::{math::{rigidbody::{RigidBody, RigidBodyType, RigidBodyMoveError, RigidBodyAABBError}, vector::{PhysVector2, ZERO_VECTOR2}, intersect_circle, intersect_polygons, intersect_circle_polygon, vector_dot, intersect_polygons_centered, intersect_circle_polygon_centered, clamp, manifold::PhysManifold, find_contact_points, aabb::PhysAABB, intersect_aabb, vector_cross, vector_average, vector_nearly_equal, vector_normalize}, spawner::{spawn_rect, spawn_rect_default, SpawnError, spawn_circle_default, SpawnMetadata, SpawnArgs, spawn_circle, DEFAULT_STROKE_COLOR, DEFAULT_FILL_COLOR, DEFAULT_STROKE_WIDTH}};
 
 #[derive(Resource)]
 pub struct PhysBody {
@@ -54,7 +54,6 @@ impl WorldData {
         self.selected_body.insert((body, index))
     }
 }
-
 pub struct Extents {
     pub left: f32,
     pub right: f32,
@@ -72,7 +71,7 @@ pub struct PhysManager {
 
 impl Default for PhysManager {
     fn default() -> Self {
-        Self::new(PhysVector2 { x: 0.0, y: -98.1*5.0 }, Extents { left: -600.0, right: 600.0, bottom: -350.0, top: 350.0 })
+        Self::new(PhysVector2 { x: 0.0, y: -9.81 }, Extents { left: -60.0, right: 60.0, bottom: -35.0, top: 35.0 })
     }
 }
 
@@ -111,7 +110,7 @@ impl PhysManager {
         };
 
         for _i in 0..n_render {
-            let contact_point_entity = spawn_rect(commands, &ZERO_VECTOR2, 10.0, 10.0, SpawnArgs {
+            let contact_point_entity = spawn_rect(commands, &ZERO_VECTOR2, 0.7, 0.7, SpawnArgs {
                 z_value: 2.0,
                 fill_color: *DEFAULT_FILL_COLOR,
                 stroke_color: *DEFAULT_STROKE_COLOR,
@@ -127,7 +126,7 @@ impl PhysManager {
     }
 
     pub fn remove_body(&mut self, commands: &mut Commands, index: usize) {
-        let (entity, _body) = self.bodies.swap_remove(index);
+        let (entity, _body) = self.bodies.remove(index);
         let contact_render_entity = self.contact_list_render_pool.pop().unwrap();
         commands.entity(entity).despawn();
         commands.entity(contact_render_entity).despawn();
@@ -265,7 +264,6 @@ impl PhysManager {
                 self.resolve_collision(&contact);
                 contact_points.push(contact)
             }
-
         }
 
         let mut next_contact: Option<PhysVector2> = None;
@@ -302,7 +300,7 @@ impl PhysManager {
         Ok(())
     }
 
-    pub fn resolve_collision(&mut self, contact: &PhysManifold) {
+    pub fn resolve_collision_basic(&mut self, contact: &PhysManifold) {
         let ((_, a), (_, b)) = self.get_two_body_mut(contact.a_index, contact.b_index).unwrap();
         
         let relative_velocity = b.body.linear_velocity.sub(&a.body.linear_velocity);
@@ -320,6 +318,189 @@ impl PhysManager {
         let impulse = contact.normal.mul(j);
         a.body.linear_velocity = a.body.linear_velocity.sub(&impulse.mul(a.body.inverse_mass));
         b.body.linear_velocity = b.body.linear_velocity.add(&impulse.mul(b.body.inverse_mass));
+    }
+
+    pub fn resolve_collision_alternate(&mut self, contact: &PhysManifold) {
+        let ((_, a), (_, b)) = self.get_two_body_mut(contact.a_index, contact.b_index).unwrap();
+        let normal = contact.normal;
+
+        let e = f32::min(a.body.restitution, b.body.restitution);
+        let cp = vector_average(&contact.contact_one, &contact.contact_two);
+        let (ra, rb) = (cp.sub(&a.body.position), cp.sub(&b.body.position));
+        let (ra_perp, rb_perp) = (PhysVector2 { x: -ra.y, y: ra.x }, PhysVector2 { x: -rb.y, y: rb.x });
+        let angular_linear_velocity_a = ra_perp.mul(a.body.rotational_velocity);
+        let angular_linear_velocity_b = rb_perp.mul(b.body.rotational_velocity);
+
+        let relative_velocity = (b.body.linear_velocity.add(&angular_linear_velocity_b))
+                                        .sub(&a.body.linear_velocity.add(&angular_linear_velocity_a));
+        
+        let contact_velocity_magnitude = vector_dot(&relative_velocity, &normal);
+        if contact_velocity_magnitude > 0.0 {
+            return;
+        }
+
+        let ra_perp_dot_n = vector_dot(&ra_perp, &normal);
+        let rb_perp_dot_n = vector_dot(&rb_perp, &normal);
+
+        let numerator = -(1.0 + e) * contact_velocity_magnitude;
+        let denominator = (a.body.inverse_mass + b.body.inverse_mass) 
+                                + (ra_perp_dot_n * ra_perp_dot_n * a.body.inverse_inertia)
+                                + (rb_perp_dot_n * rb_perp_dot_n * b.body.inverse_inertia);
+        
+        let j = (numerator / denominator);
+
+        let impulse = normal.mul(j);
+
+        a.body.linear_velocity = a.body.linear_velocity.sub(&impulse.mul(a.body.inverse_mass));
+        b.body.linear_velocity = b.body.linear_velocity.add(&impulse.mul(b.body.inverse_mass));
+        a.body.rotational_velocity = a.body.rotational_velocity.add(-vector_cross(&ra, &impulse) * a.body.inverse_inertia);
+        b.body.rotational_velocity = b.body.rotational_velocity.add(vector_cross(&rb, &impulse) * b.body.inverse_inertia);
+    }
+
+    pub fn resolve_collision_without_friction(&mut self, contact: &PhysManifold) {
+        let ((_, a), (_, b)) = self.get_two_body_mut(contact.a_index, contact.b_index).unwrap();
+        let normal = contact.normal;
+
+        let e = f32::min(a.body.restitution, b.body.restitution);
+        let contact_list = [contact.contact_one, contact.contact_two];
+
+        let mut impulse_list: [(PhysVector2, PhysVector2, PhysVector2); 2] = [(ZERO_VECTOR2, ZERO_VECTOR2, ZERO_VECTOR2), (ZERO_VECTOR2, ZERO_VECTOR2, ZERO_VECTOR2)];
+
+        for (i, cp) in contact_list.iter().enumerate() {
+            let (ra, rb) = (cp.sub(&a.body.position), cp.sub(&b.body.position));
+            let (ra_perp, rb_perp) = (PhysVector2 { x: -ra.y, y: ra.x }, PhysVector2 { x: -rb.y, y: rb.x });
+            let angular_linear_velocity_a = ra_perp.mul(a.body.rotational_velocity);
+            let angular_linear_velocity_b = rb_perp.mul(b.body.rotational_velocity);
+
+            let relative_velocity = (b.body.linear_velocity.add(&angular_linear_velocity_b))
+                                            .sub(&a.body.linear_velocity.add(&angular_linear_velocity_a));
+            
+            let contact_velocity_magnitude = vector_dot(&relative_velocity, &normal);
+            if contact_velocity_magnitude > 0.0 {
+                continue;
+            }
+
+            let ra_perp_dot_n = vector_dot(&ra_perp, &normal);
+            let rb_perp_dot_n = vector_dot(&rb_perp, &normal);
+
+            let numerator = -(1.0 + e) * contact_velocity_magnitude;
+            let denominator = (a.body.inverse_mass + b.body.inverse_mass) 
+                                 + (ra_perp_dot_n * ra_perp_dot_n * a.body.inverse_inertia)
+                                 + (rb_perp_dot_n * rb_perp_dot_n * b.body.inverse_inertia);
+            
+            let j = (numerator / denominator) / contact.contact_count as f32;
+    
+            let impulse = normal.mul(j);
+            impulse_list[i] = (ra, rb, impulse);
+        }
+
+        for i in 0..contact.contact_count {
+            let (ra, rb, impulse) = impulse_list[i as usize];
+            a.body.linear_velocity = a.body.linear_velocity.sub(&impulse.mul(a.body.inverse_mass));
+            a.body.rotational_velocity = a.body.rotational_velocity.add(-vector_cross(&ra, &impulse) * a.body.inverse_inertia);
+            b.body.linear_velocity = b.body.linear_velocity.add(&impulse.mul(b.body.inverse_mass));
+            b.body.rotational_velocity = b.body.rotational_velocity.add(vector_cross(&rb, &impulse) * b.body.inverse_inertia);
+        }
+    }
+
+    pub fn resolve_collision(&mut self, contact: &PhysManifold) {
+        let ((_, a), (_, b)) = self.get_two_body_mut(contact.a_index, contact.b_index).unwrap();
+        let normal = contact.normal;
+
+        let e = f32::min(a.body.restitution, b.body.restitution);
+        let (sf, df) = ((a.body.static_friction+b.body.static_friction)/2.0, (a.body.dynamic_friction+b.body.dynamic_friction)/2.0);
+        let contact_list = [contact.contact_one, contact.contact_two];
+
+        let mut r_list: [(PhysVector2, PhysVector2); 2] = [(ZERO_VECTOR2, ZERO_VECTOR2), (ZERO_VECTOR2, ZERO_VECTOR2)];
+        let mut impulse_list: [PhysVector2; 2] = [ZERO_VECTOR2, ZERO_VECTOR2];
+        let mut friction_list: [PhysVector2; 2] = [ZERO_VECTOR2, ZERO_VECTOR2];
+        let mut j_list: [f32; 2] = [0.0, 0.0];
+
+        for (i, cp) in contact_list.iter().enumerate() {
+            let (ra, rb) = (cp.sub(&a.body.position), cp.sub(&b.body.position));
+            let (ra_perp, rb_perp) = (PhysVector2 { x: -ra.y, y: ra.x }, PhysVector2 { x: -rb.y, y: rb.x });
+            let angular_linear_velocity_a = ra_perp.mul(a.body.rotational_velocity);
+            let angular_linear_velocity_b = rb_perp.mul(b.body.rotational_velocity);
+
+            let relative_velocity = (b.body.linear_velocity.add(&angular_linear_velocity_b))
+                                            .sub(&a.body.linear_velocity.add(&angular_linear_velocity_a));
+            
+            let contact_velocity_magnitude = vector_dot(&relative_velocity, &normal);
+            if contact_velocity_magnitude > 0.0 {
+                continue;
+            }
+
+            let ra_perp_dot_n = vector_dot(&ra_perp, &normal);
+            let rb_perp_dot_n = vector_dot(&rb_perp, &normal);
+
+            let numerator = -(1.0 + e) * contact_velocity_magnitude;
+            let denominator = (a.body.inverse_mass + b.body.inverse_mass) 
+                                 + (ra_perp_dot_n * ra_perp_dot_n * a.body.inverse_inertia)
+                                 + (rb_perp_dot_n * rb_perp_dot_n * b.body.inverse_inertia);
+            
+            let j = (numerator / denominator) / contact.contact_count as f32;
+    
+            let impulse = normal.mul(j);
+            impulse_list[i] = impulse;
+            r_list[i] = (ra, rb);
+            j_list[i] = j;
+        }
+
+        for i in 0..contact.contact_count {
+            let ((ra, rb), impulse) = (r_list[i as usize], impulse_list[i as usize]);
+            a.body.linear_velocity = a.body.linear_velocity.sub(&impulse.mul(a.body.inverse_mass));
+            a.body.rotational_velocity = a.body.rotational_velocity.add(-vector_cross(&ra, &impulse) * a.body.inverse_inertia);
+            b.body.linear_velocity = b.body.linear_velocity.add(&impulse.mul(b.body.inverse_mass));
+            b.body.rotational_velocity = b.body.rotational_velocity.add(vector_cross(&rb, &impulse) * b.body.inverse_inertia);
+        }
+
+        for (i, cp) in contact_list.iter().enumerate() {
+            let (ra, rb) = (cp.sub(&a.body.position), cp.sub(&b.body.position));
+            let (ra_perp, rb_perp) = (PhysVector2 { x: -ra.y, y: ra.x }, PhysVector2 { x: -rb.y, y: rb.x });
+            let angular_linear_velocity_a = ra_perp.mul(a.body.rotational_velocity);
+            let angular_linear_velocity_b = rb_perp.mul(b.body.rotational_velocity);
+
+            let relative_velocity = (b.body.linear_velocity.add(&angular_linear_velocity_b))
+                                            .sub(&a.body.linear_velocity.add(&angular_linear_velocity_a));
+            
+            let mut tangent = relative_velocity.sub(&normal.mul(vector_dot(&relative_velocity, &normal)));
+            if vector_nearly_equal(&tangent, &ZERO_VECTOR2) {
+                continue;
+            }
+            else {
+                tangent = vector_normalize(&tangent);
+            }
+
+            let ra_perp_dot_t = vector_dot(&ra_perp, &tangent);
+            let rb_perp_dot_t = vector_dot(&rb_perp, &tangent);
+
+            let numerator = -vector_dot(&relative_velocity, &tangent);
+            let denominator = (a.body.inverse_mass + b.body.inverse_mass) 
+                                 + (ra_perp_dot_t * ra_perp_dot_t * a.body.inverse_inertia)
+                                 + (rb_perp_dot_t * rb_perp_dot_t * b.body.inverse_inertia);
+            
+            let jt = (numerator / denominator) / contact.contact_count as f32;
+            let j = j_list[i];
+            let friction_impulse = if jt.abs() <= j * sf {
+                tangent.mul(jt)
+            }
+            else {
+                tangent.mul(-j*df)
+            };
+
+
+            friction_list[i] = friction_impulse;
+        }
+
+        for i in 0..contact.contact_count {
+            let friction_impulse = friction_list[i as usize];
+            let (ra, rb) = r_list[i as usize];
+
+            a.body.linear_velocity = a.body.linear_velocity.sub(&friction_impulse.mul(a.body.inverse_mass));
+            a.body.rotational_velocity = a.body.rotational_velocity.add(-vector_cross(&ra, &friction_impulse) * a.body.inverse_inertia);
+            b.body.linear_velocity = b.body.linear_velocity.add(&friction_impulse.mul(b.body.inverse_mass));
+            b.body.rotational_velocity = b.body.rotational_velocity.add(vector_cross(&rb, &friction_impulse) * b.body.inverse_inertia);
+        }
     }
 
     pub fn step(&mut self, commands: &mut Commands, mut entity_q: Query<(&mut Transform, &mut Visibility, &mut SpawnMetadata)>, time: f32, iterations: usize) {
