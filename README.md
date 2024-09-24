@@ -1,4 +1,4 @@
-# Physics Engine
+## Physics Engine
 Hobby project written in rust.
 Followed this resource - https://www.youtube.com/watch?v=lzI7QUyl66g.
 
